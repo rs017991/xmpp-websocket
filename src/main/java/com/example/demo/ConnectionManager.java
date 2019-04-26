@@ -22,6 +22,7 @@ import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.packet.Presence;
 import org.jivesoftware.smack.roster.Roster;
 import org.jivesoftware.smack.roster.RosterEntry;
+import org.jivesoftware.smackx.chatstates.ChatStateManager;
 import org.jivesoftware.smackx.delay.packet.DelayInformation;
 import org.jxmpp.jid.BareJid;
 import org.jxmpp.jid.EntityBareJid;
@@ -36,6 +37,7 @@ import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import com.example.demo.pojo.ChatState;
 import com.example.demo.pojo.IncomingMessage;
 import com.example.demo.pojo.LoginResponse;
 import com.example.demo.pojo.OutgoingMessage;
@@ -91,6 +93,10 @@ public class ConnectionManager implements DisposableBean {
 		// chat
 		ChatManager chatManager = ChatManager.getInstanceFor(connection);
 		chatManager.addIncomingListener(new IncomingChatMessageListenerImpl(this));
+
+		// chat state
+		ChatStateManager chatStateManager = ChatStateManager.getInstance(connection);
+		chatStateManager.addChatStateListener(new ChatStateListenerImpl(this));
 	}
 
 	/**
@@ -281,5 +287,13 @@ public class ConnectionManager implements DisposableBean {
 				}
 			}
 		}
+	}
+
+	public void notifyChatState(String fromJid, String toJid, org.jivesoftware.smackx.chatstates.ChatState state) {
+		ChatState chatState = new ChatState();
+		chatState.setChatState(state);
+		chatState.setFrom(fromJid);
+
+		sendToJid(toJid, "/queue/chatState", chatState);
 	}
 }

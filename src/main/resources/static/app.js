@@ -36,7 +36,7 @@ function setLoggedIn(loggedOn) {
 function connect() {
 	var socket = new SockJS('/websocket');
 	stompClient = Stomp.over(socket);
-	//stompClient.debug = () => {}; // comment out to re-enable debug messages
+	stompClient.debug = () => {}; // comment out to re-enable debug messages
 	stompClient.connect({}, function(frame) {
 		setConnected(true);
 		console.log('Connected: ' + frame);
@@ -100,6 +100,21 @@ function connect() {
 				}
 			}
 		});
+		stompClient.subscribe('/user/queue/chatState', (json) => {
+			let chatState = JSON.parse(json.body);
+			let chatWindow = getChatWindow(chatState.from);
+			if (chatWindow) {
+				let chatContent = chatWindow.querySelector(".chatContent");
+				let alreadyAtBottom = chatContent.scrollHeight - chatContent.scrollTop === chatContent.clientHeight; // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollHeight#Determine_if_an_element_has_been_totally_scrolled
+
+				let chatStateDisplay = chatState.chatState === 'active' ? '' : jidToName(chatState.from) + " is " + chatState.chatState;
+				chatWindow.querySelector(".chatState").innerText = chatStateDisplay;
+
+				if (alreadyAtBottom) {
+					chatContent.lastChild.scrollIntoView({ behavior: "smooth" });
+				}
+			}
+		});
 	});
 }
 
@@ -148,10 +163,10 @@ function addMessageToChatContent(timestamp, mine, fromJid, messageBody, chatWind
 	message.appendChild(from);
 	message.appendChild(body);
 	var chatContent = chatWindow.querySelector(".chatContent");
-	chatContent.appendChild(message);
+	chatContent.insertBefore(message, chatContent.lastChild); // insert before the chat state div
 
 	// scroll to bottom
-	chatContent.scrollTop = chatContent.scrollHeight;
+	chatContent.lastChild.scrollIntoView({ behavior: "smooth" });
 }
 
 function findRosterEntryByJid(jid) {
@@ -168,11 +183,16 @@ function jidToFullDisplay(jid) {
 	return (name === jid) ? jid : (name + " (" + jid + ")");
 }
 
+function getChatWindow(jid) {
+	let chatWindows = document.getElementById("chatWindows");
+	return Array.from(chatWindows.getElementsByClassName("chatWindow")).find(el => el.dataset.jid === jid);
+}
+
 function showChatWindow(jid) {
 	var chatWindows = document.getElementById("chatWindows");
 
 	// check if a chat with this jid is already open
-	var jidChatWindow = Array.from(chatWindows.getElementsByClassName("chatWindow")).find(el => el.dataset.jid === jid);
+	var jidChatWindow = getChatWindow(jid);
 	if (!jidChatWindow) {
 		var chatWindow = document.createElement("div");
 		chatWindow.className = "chatWindow";
@@ -192,6 +212,9 @@ function showChatWindow(jid) {
 		var chatContent = document.createElement("div");
 		chatContent.className = "chatContent";
 
+		var chatState = document.createElement("div");
+		chatState.className = "chatState";
+
 		// wrap input in form so we can deal with submit event instead of
 		// keypress event, etc.
 		var form = document.createElement("form");
@@ -204,6 +227,7 @@ function showChatWindow(jid) {
 		chatTitle.appendChild(name);
 		chatTitle.appendChild(close);
 		chatWindow.appendChild(chatTitle);
+		chatContent.appendChild(chatState);
 		chatWindow.appendChild(chatContent);
 		form.appendChild(chatInput);
 		chatWindow.appendChild(form);

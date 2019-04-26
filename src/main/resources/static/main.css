@@ -112,14 +112,17 @@
 	content: ": ";
 }
 
-.chatContent .message.mine .timestamp, .chatContent .message.mine .from
-	{
+.chatContent .message.mine .timestamp, .chatContent .message.mine .from {
 	color: blue;
 }
 
-.chatContent .message.theirs .timestamp, .chatContent .message.theirs .from
-	{
+.chatContent .message.theirs .timestamp, .chatContent .message.theirs .from {
 	color: red;
+}
+
+.chatContent .chatState {
+	font-style: italic;
+	color: #ccc;
 }
 
 .chatInput {
