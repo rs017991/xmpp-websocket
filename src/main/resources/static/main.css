@@ -14,12 +14,7 @@
 	transition: all 0.3s;
 	/* need this to override center aligning from login form styles */
 	text-align: left;
-}
-
-#roster li {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	border-left: 1px solid #ccc;
 }
 
 #roster .jid {
@@ -34,6 +29,10 @@
 
 #roster .entry {
 	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	padding: 5px;
 }
 
 #roster .entry:hover {
