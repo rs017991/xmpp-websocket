@@ -1,22 +1,25 @@
 package com.example.demo.pojo;
 
+/**
+ * used to represent by incoming and outgoing chat state changes 
+ */
 public class ChatState {
-	private String from;
-	private org.jivesoftware.smackx.chatstates.ChatState chatState;
+	private String jid;
+	private org.jivesoftware.smackx.chatstates.ChatState state;
 
-	public String getFrom() {
-		return from;
+	public String getJid() {
+		return jid;
 	}
 
-	public void setFrom(String from) {
-		this.from = from;
+	public void setJid(String jid) {
+		this.jid = jid;
 	}
 
-	public org.jivesoftware.smackx.chatstates.ChatState getChatState() {
-		return chatState;
+	public org.jivesoftware.smackx.chatstates.ChatState getState() {
+		return state;
 	}
 
-	public void setChatState(org.jivesoftware.smackx.chatstates.ChatState chatState) {
-		this.chatState = chatState;
+	public void setState(org.jivesoftware.smackx.chatstates.ChatState state) {
+		this.state = state;
 	}
 }

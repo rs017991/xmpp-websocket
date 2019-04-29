@@ -6,6 +6,7 @@ import org.jivesoftware.smack.SmackException.NotConnectedException;
 import org.jivesoftware.smack.SmackException.NotLoggedInException;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
+import org.jxmpp.stringprep.XmppStringprepException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +14,7 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.stereotype.Controller;
 
+import com.example.demo.pojo.ChatState;
 import com.example.demo.pojo.LoginRequest;
 import com.example.demo.pojo.LoginResponse;
 import com.example.demo.pojo.OutgoingMessage;
@@ -29,8 +31,15 @@ public class XmppController {
 		connectionManager.sendXmppMessage(sessionId, message);
 	}
 
+	@MessageMapping("/chatState")
+	public void sendChatState(ChatState chatState, @Header("simpSessionId") String sessionId)
+			throws XmppStringprepException, NotConnectedException, InterruptedException {
+		connectionManager.sendChatState(sessionId, chatState.getJid(), chatState.getState());
+	}
+
 	@MessageMapping("/login")
-	public void login(LoginRequest loginRequest, @Header("simpSessionId") String sessionId) throws NotLoggedInException, NotConnectedException, InterruptedException {
+	public void login(LoginRequest loginRequest, @Header("simpSessionId") String sessionId)
+			throws NotLoggedInException, NotConnectedException, InterruptedException {
 		LoginResponse loginResponse = new LoginResponse();
 		loginResponse.setSuccess(false); // guilty until proven innocent
 

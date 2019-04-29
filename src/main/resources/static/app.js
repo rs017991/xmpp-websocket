@@ -1,5 +1,6 @@
 var stompClient = null;
 var myJid = null; // only set after successful login
+var jidToTimeout = {};
 
 function setConnected(connected) {
 }
@@ -102,12 +103,12 @@ function connect() {
 		});
 		stompClient.subscribe('/user/queue/chatState', (json) => {
 			let chatState = JSON.parse(json.body);
-			let chatWindow = getChatWindow(chatState.from);
+			let chatWindow = getChatWindow(chatState.jid);
 			if (chatWindow) {
 				let chatContent = chatWindow.querySelector(".chatContent");
 				let alreadyAtBottom = chatContent.scrollHeight - chatContent.scrollTop === chatContent.clientHeight; // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollHeight#Determine_if_an_element_has_been_totally_scrolled
 
-				let chatStateDisplay = chatState.chatState === 'active' ? '' : jidToName(chatState.from) + " is " + chatState.chatState;
+				let chatStateDisplay = chatState.state === 'active' ? '' : jidToName(chatState.jid) + " is " + chatState.state;
 				chatWindow.querySelector(".chatState").innerText = chatStateDisplay;
 
 				if (alreadyAtBottom) {
@@ -196,7 +197,7 @@ function showChatWindow(jid) {
 	if (!jidChatWindow) {
 		var chatWindow = document.createElement("div");
 		chatWindow.className = "chatWindow";
-		chatWindow.setAttribute("data-jid", jid);
+		chatWindow.dataset.jid = jid;
 
 		var chatTitle = document.createElement("div");
 		chatTitle.className = "chatTitle";
@@ -238,6 +239,26 @@ function showChatWindow(jid) {
 	return jidChatWindow;
 }
 
+function clearTimeoutByJid(jid) {
+	if (jidToTimeout[jid]) {
+		clearTimeout(jidToTimeout[jid]);
+	}
+}
+
+function setChatState(jid, state) {
+	var chatWindow = getChatWindow(jid);
+
+	// only do stuff if the chat state has actually changed
+	if (chatWindow.dataset.state !== state) {
+		chatWindow.dataset.state = state;
+
+		stompClient.send("/app/chatState", {}, JSON.stringify({
+			jid : jid,
+			state : state
+		}));
+	}
+}
+
 (function() {
 	// event handlers
 	document.getElementById("form-signin").addEventListener('submit', (event) => {
@@ -277,6 +298,22 @@ function showChatWindow(jid) {
 	document.getElementById("chatWindows").addEventListener('submit', (event) => {
 		event.preventDefault();
 		sendMessage(event);
+	});
+	document.getElementById("chatWindows").addEventListener('input', (event) => {
+		if (event.target.classList.contains('chatInput')) {
+			let chatInputValue = event.target.value;
+			let chatWindow = event.target.closest(".chatWindow");
+			let jid = chatWindow.dataset.jid;
+			if (chatInputValue === '') {
+				clearTimeoutByJid(jid);
+				setChatState(jid, "active");
+				jidToTimeout[jid] = setTimeout(() => setChatState(jid, "inactive"), 120000);
+			} else {
+				clearTimeoutByJid(jid);
+				setChatState(jid, "composing");
+				jidToTimeout[jid] = setTimeout(() => setChatState(jid, "paused"), 5000);
+			}
+		}
 	});
 
 	connect();

@@ -17,6 +17,7 @@ import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.ReconnectionManager;
 import org.jivesoftware.smack.SmackException.NotConnectedException;
 import org.jivesoftware.smack.SmackException.NotLoggedInException;
+import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
 import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.packet.Presence;
@@ -291,9 +292,25 @@ public class ConnectionManager implements DisposableBean {
 
 	public void notifyChatState(String fromJid, String toJid, org.jivesoftware.smackx.chatstates.ChatState state) {
 		ChatState chatState = new ChatState();
-		chatState.setChatState(state);
-		chatState.setFrom(fromJid);
+		chatState.setState(state);
+		chatState.setJid(fromJid);
 
 		sendToJid(toJid, "/queue/chatState", chatState);
+	}
+
+	public void sendChatState(String sessionId, String toJid, org.jivesoftware.smackx.chatstates.ChatState state)
+			throws XmppStringprepException, NotConnectedException, InterruptedException {
+		String jid = sessionIdToJidMap.get(sessionId);
+		if (jid != null) {
+			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+
+			ChatStateManager chatStateManager = ChatStateManager.getInstance(connection);
+
+			ChatManager chatManager = ChatManager.getInstanceFor(connection);
+			EntityBareJid entityBareJid = JidCreate.entityBareFrom(toJid);
+			Chat chat = chatManager.chatWith(entityBareJid);
+
+			chatStateManager.setCurrentState(state, chat);
+		}
 	}
 }
