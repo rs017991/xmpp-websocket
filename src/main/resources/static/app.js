@@ -259,6 +259,18 @@ function setChatState(jid, state) {
 	}
 }
 
+function handleChatInput(jid, chatInputValue) {
+	if (chatInputValue === '') {
+		clearTimeoutByJid(jid);
+		setChatState(jid, "active");
+		jidToTimeout[jid] = setTimeout(() => setChatState(jid, "inactive"), 120000);
+	} else {
+		clearTimeoutByJid(jid);
+		setChatState(jid, "composing");
+		jidToTimeout[jid] = setTimeout(() => setChatState(jid, "paused"), 5000);
+	}
+}
+
 (function() {
 	// event handlers
 	document.getElementById("form-signin").addEventListener('submit', (event) => {
@@ -298,21 +310,18 @@ function setChatState(jid, state) {
 	document.getElementById("chatWindows").addEventListener('submit', (event) => {
 		event.preventDefault();
 		sendMessage(event);
+
+		let chatWindow = event.target.closest(".chatWindow");
+		let jid = chatWindow.dataset.jid;
+		// clears outstanding timeouts and changes state to active
+		handleChatInput(jid, "");
 	});
 	document.getElementById("chatWindows").addEventListener('input', (event) => {
 		if (event.target.classList.contains('chatInput')) {
 			let chatInputValue = event.target.value;
 			let chatWindow = event.target.closest(".chatWindow");
 			let jid = chatWindow.dataset.jid;
-			if (chatInputValue === '') {
-				clearTimeoutByJid(jid);
-				setChatState(jid, "active");
-				jidToTimeout[jid] = setTimeout(() => setChatState(jid, "inactive"), 120000);
-			} else {
-				clearTimeoutByJid(jid);
-				setChatState(jid, "composing");
-				jidToTimeout[jid] = setTimeout(() => setChatState(jid, "paused"), 5000);
-			}
+			handleChatInput(jid, chatInputValue);
 		}
 	});
 
