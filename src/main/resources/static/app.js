@@ -135,17 +135,19 @@ function sendMessage(event) {
 	var inputValue = chatInput.value;
 	// console.log("sendMessage: " + jid + ", " + inputValue);
 
-	// send to server
-	stompClient.send("/app/outgoingMessage", {}, JSON.stringify({
-		'message' : inputValue,
-		'to' : jid
-	}));
-
-	// add message to chat content
-	addMessageToChatContent(new Date(), true, myJid, inputValue, chatWindow);
+	if (inputValue !== "") {
+		// send to server
+		stompClient.send("/app/outgoingMessage", {}, JSON.stringify({
+			'message' : inputValue,
+			'to' : jid
+		}));
 	
-	// clear input
-	chatInput.value = "";
+		// add message to chat content
+		addMessageToChatContent(new Date(), true, myJid, inputValue, chatWindow);
+		
+		// clear input
+		chatInput.value = "";
+	}
 }
 
 function addMessageToChatContent(timestamp, mine, fromJid, messageBody, chatWindow) {
