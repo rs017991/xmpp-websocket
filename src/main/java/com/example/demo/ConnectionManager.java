@@ -2,6 +2,8 @@ package com.example.demo;
 
 import static org.springframework.util.CollectionUtils.isEmpty;
 
+import java.io.ByteArrayInputStream;
+import java.text.DecimalFormat;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -25,8 +27,12 @@ import org.jivesoftware.smack.roster.Roster;
 import org.jivesoftware.smack.roster.RosterEntry;
 import org.jivesoftware.smackx.chatstates.ChatStateManager;
 import org.jivesoftware.smackx.delay.packet.DelayInformation;
+import org.jivesoftware.smackx.filetransfer.FileTransferManager;
+import org.jivesoftware.smackx.filetransfer.OutgoingFileTransfer;
+import org.jivesoftware.smackx.filetransfer.FileTransfer.Status;
 import org.jxmpp.jid.BareJid;
 import org.jxmpp.jid.EntityBareJid;
+import org.jxmpp.jid.EntityFullJid;
 import org.jxmpp.jid.Jid;
 import org.jxmpp.jid.impl.JidCreate;
 import org.jxmpp.stringprep.XmppStringprepException;
@@ -311,6 +317,54 @@ public class ConnectionManager implements DisposableBean {
 			Chat chat = chatManager.chatWith(entityBareJid);
 
 			chatStateManager.setCurrentState(state, chat);
+		}
+	}
+
+	public void sendFile(String sessionId, byte[] payload, String filename, String contentType, String recipientJid)
+			throws XmppStringprepException, InterruptedException {
+		String jid = sessionIdToJidMap.get(sessionId);
+		if (jid != null) {
+			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+
+			// get the full jid from the bare jid
+			// TODO we probably shouldn't need to do this if we were managing
+			// the resources properly
+			Roster roster = Roster.getInstanceFor(connection);
+			final Presence presense = roster.getPresence(JidCreate.entityBareFrom(recipientJid));
+			final Jid presenceJid = presense.getFrom();
+			if (presenceJid == null || !(presenceJid instanceof EntityFullJid)) {
+				LOGGER.error("No resource found for contact.  Contact may not be online");
+				return;
+			}
+			final EntityFullJid fullJid = (EntityFullJid) presenceJid;
+
+			// Create the file transfer manager
+			FileTransferManager manager = FileTransferManager.getInstanceFor(connection);
+			// Create the outgoing file transfer
+			OutgoingFileTransfer transfer = manager.createOutgoingFileTransfer(fullJid);
+			// Send the file
+			transfer.sendStream(new ByteArrayInputStream(payload), filename, payload.length, "");
+
+			// TODO provide feedback in the UI instead of logs
+			Status currentStatus = null;
+			while (!transfer.isDone()) {
+				if (transfer.getStatus() != currentStatus) {
+					currentStatus = transfer.getStatus();
+					LOGGER.info("Transfer status: {}", transfer.getStatus());
+				}
+				if (Status.in_progress == transfer.getStatus()) {
+					final DecimalFormat df = new DecimalFormat("#.#");
+
+					String percent = df.format((transfer.getProgress() * 100.0d));
+					LOGGER.info("Transfer progress: {}%", percent);
+				}
+
+				Thread.sleep(500);
+			}
+			LOGGER.info("Final transfer status: " + transfer.getStatus());
+			if (Status.error == transfer.getStatus()) {
+				LOGGER.error("Transfer errored out with exception", transfer.getException());
+			}
 		}
 	}
 }

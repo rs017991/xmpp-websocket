@@ -35,10 +35,25 @@ function setLoggedIn(loggedOn) {
 }
 
 function connect() {
-	var socket = new SockJS('/websocket');
-	stompClient = Stomp.over(socket);
-	stompClient.debug = () => {}; // comment out to re-enable debug messages
-	stompClient.connect({}, function(frame) {
+	stompClient = new StompJs.Client({
+		brokerURL: (location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/websocket',
+		debug: function (str) {
+			console.log(str);
+		}
+	});
+	stompClient.onWebSocketClose = function(closeEvent) {
+		console.log(closeEvent);
+	};
+	stompClient.onStompError = function (frame) {
+		// Will be invoked in case of error encountered at Broker
+		// Bad login/passcode typically will cause an error
+		// Complaint brokers will set `message` header with a brief message.
+		// Body may contain details.
+		// Compliant brokers will terminate the connection after any error
+		console.log('Broker reported error: ' + frame.headers['message']);
+		console.log('Additional details: ' + frame.body);
+	};
+	stompClient.onConnect = function(frame) {
 		setConnected(true);
 		console.log('Connected: ' + frame);
 		stompClient.subscribe('/user/queue/login', (loginResponse) => {
@@ -116,17 +131,9 @@ function connect() {
 				}
 			}
 		});
-	});
+	};
+	stompClient.activate();
 }
-
-// function disconnect() {
-// console.log("disconnect()");
-// if (stompClient !== null) {
-// stompClient.disconnect();
-// }
-// setConnected(false);
-// console.log("Disconnected");
-// }
 
 function sendMessage(event) {
 	var chatWindow = event.target.closest(".chatWindow");
@@ -137,10 +144,10 @@ function sendMessage(event) {
 
 	if (inputValue !== "") {
 		// send to server
-		stompClient.send("/app/outgoingMessage", {}, JSON.stringify({
+		stompClient.publish({destination: '/app/outgoingMessage', body: JSON.stringify({
 			'message' : inputValue,
 			'to' : jid
-		}));
+		})});
 	
 		// add message to chat content
 		addMessageToChatContent(new Date(), true, myJid, inputValue, chatWindow);
@@ -224,14 +231,23 @@ function showChatWindow(jid) {
 
 		var chatInput = document.createElement("input");
 		chatInput.className = "chatInput";
-		chatInput.setAttribute("name", "chatInput");
+		chatInput.setAttribute("type", "text");
+		chatInput.name = "chatInput";
 		chatInput.setAttribute("autocomplete", "off");
+
+		var fileLabel = document.createElement("label");
+
+		var fileInput = document.createElement("input");
+		fileInput.setAttribute("type", "file");
+		fileInput.name = "file";
 
 		chatTitle.appendChild(name);
 		chatTitle.appendChild(close);
 		chatWindow.appendChild(chatTitle);
 		chatContent.appendChild(chatState);
 		chatWindow.appendChild(chatContent);
+		fileLabel.appendChild(fileInput);
+		form.appendChild(fileLabel);
 		form.appendChild(chatInput);
 		chatWindow.appendChild(form);
 		chatWindows.prepend(chatWindow);
@@ -254,10 +270,10 @@ function setChatState(jid, state) {
 	if (chatWindow.dataset.state !== state) {
 		chatWindow.dataset.state = state;
 
-		stompClient.send("/app/chatState", {}, JSON.stringify({
+		stompClient.publish({destination: '/app/chatState', body: JSON.stringify({
 			jid : jid,
 			state : state
-		}));
+		})});
 	}
 }
 
@@ -284,10 +300,10 @@ function handleChatInput(jid, chatInputValue) {
 		document.getElementById("spinner").classList.remove("d-none");
 
 		// send to server
-		stompClient.send("/app/login", {}, JSON.stringify({
+		stompClient.publish({destination: '/app/login', body: JSON.stringify({
 			'jid' : event.target.inputEmail.value,
 			'password' : event.target.inputPassword.value
-		}));
+		})});
 	});
 	document.getElementById("form-logout").addEventListener('submit', (event) => {
 		event.preventDefault();
@@ -295,7 +311,7 @@ function handleChatInput(jid, chatInputValue) {
 		setLoggedIn(false);
 
 		// send to server
-		stompClient.send("/app/logout");
+		stompClient.publish({destination: '/app/logout'});
 	});
 	document.getElementById("roster").addEventListener('click', (event) => {
 		var parent = event.target.parentNode;
@@ -324,6 +340,24 @@ function handleChatInput(jid, chatInputValue) {
 			let chatWindow = event.target.closest(".chatWindow");
 			let jid = chatWindow.dataset.jid;
 			handleChatInput(jid, chatInputValue);
+		}
+	});
+	document.getElementById("chatWindows").addEventListener('change', (event) => {
+		if (event.target.name === "file" && event.target.files.length > 0) {
+			let reader = new FileReader();
+			reader.onload = function(e) {
+				stompClient.publish({
+					destination: '/app/outgoingFile',
+					binaryBody: new Uint8Array(e.target.result),
+					headers: {
+						'content-type': event.target.files[0].type,
+						'filename': event.target.files[0].name,
+						'recipient': event.target.closest(".chatWindow").dataset.jid
+					}
+				});
+				event.target.value = null; // clear file input to allow sending of the same file again
+			}
+			reader.readAsArrayBuffer(event.target.files[0]);
 		}
 	});
 

@@ -1,5 +1,7 @@
 package com.example.demo;
 
+import java.io.IOException;
+
 import org.apache.commons.validator.routines.EmailValidator;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException.NotConnectedException;
@@ -10,6 +12,7 @@ import org.jxmpp.stringprep.XmppStringprepException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.stereotype.Controller;
@@ -29,6 +32,11 @@ public class XmppController {
 	public void sendOutgoingMessage(OutgoingMessage message, @Header("simpSessionId") String sessionId)
 			throws Exception {
 		connectionManager.sendXmppMessage(sessionId, message);
+	}
+
+	@MessageMapping("/outgoingFile")
+	public void sendOutgoingFile(Message<byte[]> message, @Header("simpSessionId") String sessionId, @Header("filename") String filename, @Header("content-type") String contentType, @Header("recipient") String jid) throws IOException, InterruptedException {
+		connectionManager.sendFile(sessionId, message.getPayload(), filename, contentType, jid);
 	}
 
 	@MessageMapping("/chatState")
