@@ -34,9 +34,14 @@ public class XmppController {
 		connectionManager.sendXmppMessage(sessionId, message);
 	}
 
-	@MessageMapping("/outgoingFile")
-	public void sendOutgoingFile(Message<byte[]> message, @Header("simpSessionId") String sessionId, @Header("filename") String filename, @Header("content-type") String contentType, @Header("recipient") String jid) throws IOException, InterruptedException {
-		connectionManager.sendFile(sessionId, message.getPayload(), filename, contentType, jid);
+	@MessageMapping("/sendOutgoingFile")
+	public void sendOutgoingFile(Message<byte[]> message, @Header("simpSessionId") String sessionId, @Header("filename") String filename, @Header("content-type") String contentType, @Header("stream") String streamId) throws IOException, InterruptedException {
+		connectionManager.sendFile(sessionId, message.getPayload(), filename, contentType, streamId);
+	}
+
+	@MessageMapping("/initiateOutgoingFile")
+	public void initiateOutgoingFile(String recipientJid, @Header("simpSessionId") String sessionId) throws XmppStringprepException {
+		connectionManager.initiateOutgoingFile(sessionId, recipientJid);
 	}
 
 	@MessageMapping("/chatState")

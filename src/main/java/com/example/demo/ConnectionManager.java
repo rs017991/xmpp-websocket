@@ -4,6 +4,7 @@ import static org.springframework.util.CollectionUtils.isEmpty;
 
 import java.io.ByteArrayInputStream;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.jivesoftware.smack.AbstractXMPPConnection;
@@ -59,6 +61,7 @@ public class ConnectionManager implements DisposableBean {
 	private Map<String, AbstractXMPPConnection> jidToConnectionMap = new HashMap<String, AbstractXMPPConnection>();
 	private Map<String, String> sessionIdToJidMap = new HashMap<String, String>();
 	private Map<String, Collection<String>> jidToSessionIdsMap = new HashMap<String, Collection<String>>();
+	private Map<String, Collection<OutgoingFileTransfer>> sessionIdToOutgoingFileTransfers = new HashMap<String, Collection<OutgoingFileTransfer>>();
 	private SimpMessagingTemplate template;
 	private static final Logger LOGGER = LoggerFactory.getLogger(ConnectionManager.class);
 
@@ -320,8 +323,50 @@ public class ConnectionManager implements DisposableBean {
 		}
 	}
 
-	public void sendFile(String sessionId, byte[] payload, String filename, String contentType, String recipientJid)
-			throws XmppStringprepException, InterruptedException {
+	public void sendFile(String sessionId, byte[] payload, String filename, String contentType, String streamId) {
+		Collection<OutgoingFileTransfer> outgoingFileTransfers = sessionIdToOutgoingFileTransfers.get(sessionId);
+		if (outgoingFileTransfers != null) {
+			Predicate<? super OutgoingFileTransfer> streamIdPredicate = transfer -> {
+				return transfer.getStreamID().equals(streamId);
+			};
+			outgoingFileTransfers.stream().filter(streamIdPredicate).findFirst().ifPresent(transfer -> {
+				// Send the file
+				transfer.sendStream(new ByteArrayInputStream(payload), filename, payload.length, "");
+
+				Status currentStatus = null;
+				while (!transfer.isDone()) {
+					if (transfer.getStatus() != currentStatus) {
+						currentStatus = transfer.getStatus();
+						LOGGER.info("Transfer status: {}", transfer.getStatus());
+						sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
+					}
+					if (Status.in_progress == transfer.getStatus()) {
+						if (LOGGER.isDebugEnabled()) {
+							final DecimalFormat df = new DecimalFormat("#.#");
+							String percent = df.format((transfer.getProgress() * 100.0d));
+							LOGGER.debug("Transfer progress: {}%", percent);
+						}
+						sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
+					}
+
+					try {
+						Thread.sleep(500);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+				LOGGER.info("Final transfer status: " + transfer.getStatus());
+				if (Status.error == transfer.getStatus()) {
+					LOGGER.error("Transfer errored out with exception", transfer.getException());
+				}
+				sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
+			});
+			outgoingFileTransfers.removeIf(streamIdPredicate);
+		}
+	}
+
+	public void initiateOutgoingFile(String sessionId, String recipientJid) throws XmppStringprepException {
 		String jid = sessionIdToJidMap.get(sessionId);
 		if (jid != null) {
 			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
@@ -334,6 +379,7 @@ public class ConnectionManager implements DisposableBean {
 			final Jid presenceJid = presense.getFrom();
 			if (presenceJid == null || !(presenceJid instanceof EntityFullJid)) {
 				LOGGER.error("No resource found for contact.  Contact may not be online");
+				// TODO how do we let the client know that it failed here?
 				return;
 			}
 			final EntityFullJid fullJid = (EntityFullJid) presenceJid;
@@ -342,29 +388,14 @@ public class ConnectionManager implements DisposableBean {
 			FileTransferManager manager = FileTransferManager.getInstanceFor(connection);
 			// Create the outgoing file transfer
 			OutgoingFileTransfer transfer = manager.createOutgoingFileTransfer(fullJid);
-			// Send the file
-			transfer.sendStream(new ByteArrayInputStream(payload), filename, payload.length, "");
-
-			// TODO provide feedback in the UI instead of logs
-			Status currentStatus = null;
-			while (!transfer.isDone()) {
-				if (transfer.getStatus() != currentStatus) {
-					currentStatus = transfer.getStatus();
-					LOGGER.info("Transfer status: {}", transfer.getStatus());
-				}
-				if (Status.in_progress == transfer.getStatus()) {
-					final DecimalFormat df = new DecimalFormat("#.#");
-
-					String percent = df.format((transfer.getProgress() * 100.0d));
-					LOGGER.info("Transfer progress: {}%", percent);
-				}
-
-				Thread.sleep(500);
+			Collection<OutgoingFileTransfer> outgoingFileTransfers = sessionIdToOutgoingFileTransfers.get(sessionId);
+			if (outgoingFileTransfers == null) {
+				outgoingFileTransfers = new ArrayList<OutgoingFileTransfer>();
+				sessionIdToOutgoingFileTransfers.put(sessionId, outgoingFileTransfers);
 			}
-			LOGGER.info("Final transfer status: " + transfer.getStatus());
-			if (Status.error == transfer.getStatus()) {
-				LOGGER.error("Transfer errored out with exception", transfer.getException());
-			}
+			outgoingFileTransfers.add(transfer);
+
+			sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
 		}
 	}
 }

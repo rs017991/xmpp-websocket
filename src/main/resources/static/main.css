@@ -151,6 +151,11 @@
 	color: #ccc;
 }
 
+.chatContent .filetransfer progress {
+	width: 100%;
+	display: block;
+}
+
 .chatInput {
 	display: block;
 	width: calc(100% - 2em);

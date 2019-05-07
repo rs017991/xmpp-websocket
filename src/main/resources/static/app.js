@@ -131,6 +131,54 @@ function connect() {
 				}
 			}
 		});
+		stompClient.subscribe('/user/queue/outgoingFileTransfer', (json) => {
+			let transfer = JSON.parse(json.body);
+			if (transfer.status === "initial" && !transfer.fileName) {
+				let recipientJid = transfer.peer.localpart + "@" + transfer.peer.domain;
+				let chatWindow = showChatWindow(recipientJid);
+				let fileInput = chatWindow.querySelector("input[type=file]");
+
+				let reader = new FileReader();
+				reader.onload = function(e) {
+					let chatContent = chatWindow.querySelector(".chatContent");
+					let transferDiv = document.createElement("div");
+					transferDiv.classList.add("filetransfer");
+					transferDiv.id = transfer.streamID;
+					let transferSpan = document.createElement("span");
+					transferSpan.innerText = "sending file " + fileInput.files[0].name + " (" + transfer.status + ")";
+					let transferProgress = document.createElement("progress");
+					transferProgress.setAttribute("value", 0);
+					transferProgress.setAttribute("max", 1);
+					transferDiv.appendChild(transferSpan);
+					transferDiv.appendChild(transferProgress);
+					chatContent.insertBefore(transferDiv, chatContent.lastChild); // insert before the chat state div
+
+					// scroll to bottom
+					chatContent.lastChild.scrollIntoView({ behavior: "smooth" });
+
+					// send the file to the server
+					stompClient.publish({
+						destination: '/app/sendOutgoingFile',
+						binaryBody: new Uint8Array(e.target.result),
+						headers: {
+							'content-type': fileInput.files[0].type,
+							'filename': fileInput.files[0].name,
+							'stream': transfer.streamID
+						}
+					});
+					fileInput.value = null; // clear file input to allow sending of the same file again
+				}
+				reader.readAsArrayBuffer(fileInput.files[0]);
+			} else {
+				let transferDiv = document.getElementById(transfer.streamID);
+				if (transferDiv) {
+					let transferSpan = transferDiv.querySelector("span");
+					transferSpan.innerText = "sending file " + transfer.fileName + " (" + transfer.status + ")";
+					let transferProgress = transferDiv.querySelector("progress");
+					transferProgress.setAttribute("value", transfer.progress);
+				}
+			}
+		});
 	};
 	stompClient.activate();
 }
@@ -344,20 +392,10 @@ function handleChatInput(jid, chatInputValue) {
 	});
 	document.getElementById("chatWindows").addEventListener('change', (event) => {
 		if (event.target.name === "file" && event.target.files.length > 0) {
-			let reader = new FileReader();
-			reader.onload = function(e) {
-				stompClient.publish({
-					destination: '/app/outgoingFile',
-					binaryBody: new Uint8Array(e.target.result),
-					headers: {
-						'content-type': event.target.files[0].type,
-						'filename': event.target.files[0].name,
-						'recipient': event.target.closest(".chatWindow").dataset.jid
-					}
-				});
-				event.target.value = null; // clear file input to allow sending of the same file again
-			}
-			reader.readAsArrayBuffer(event.target.files[0]);
+			stompClient.publish({
+				destination: '/app/initiateOutgoingFile',
+				body: event.target.closest(".chatWindow").dataset.jid
+			});
 		}
 	});
 
