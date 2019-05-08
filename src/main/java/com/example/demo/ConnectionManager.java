@@ -378,7 +378,7 @@ public class ConnectionManager implements DisposableBean {
 			final Presence presense = roster.getPresence(JidCreate.entityBareFrom(recipientJid));
 			final Jid presenceJid = presense.getFrom();
 			if (presenceJid == null || !(presenceJid instanceof EntityFullJid)) {
-				LOGGER.error("No resource found for contact.  Contact may not be online");
+				LOGGER.error("No resource found for {}--may not be online", recipientJid);
 				// TODO how do we let the client know that it failed here?
 				return;
 			}

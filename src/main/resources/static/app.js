@@ -20,6 +20,7 @@ function setLoggedIn(loggedOn) {
 		document.getElementById("form-signin").classList.remove("d-none");
 		document.getElementById("form-logout").classList.add("d-none");
 		document.getElementById("loggedInJid").innerText = "";
+		document.getElementById("form-signin").inputEmail.focus();
 
 		// clear roster
 		var roster = document.getElementById("roster");
@@ -37,9 +38,8 @@ function setLoggedIn(loggedOn) {
 function connect() {
 	stompClient = new StompJs.Client({
 		brokerURL: (location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/websocket',
-		debug: function (str) {
-			console.log(str);
-		}
+		// debug: function (str) {console.log(str);},
+		// logRawCommunication: true
 	});
 	stompClient.onWebSocketClose = function(closeEvent) {
 		console.log(closeEvent);
@@ -140,17 +140,25 @@ function connect() {
 
 				let reader = new FileReader();
 				reader.onload = function(e) {
+					// create a a new filetransfer div in the chatContent div
 					let chatContent = chatWindow.querySelector(".chatContent");
 					let transferDiv = document.createElement("div");
 					transferDiv.classList.add("filetransfer");
 					transferDiv.id = transfer.streamID;
 					let transferSpan = document.createElement("span");
-					transferSpan.innerText = "sending file " + fileInput.files[0].name + " (" + transfer.status + ")";
+					transferSpan.innerText = "sending file " + fileInput.files[0].name + " (" + filesize(fileInput.files[0].size) + ")";
+					let wrapper = document.createElement("div");
+					wrapper.classList.add("progress-wrapper");
 					let transferProgress = document.createElement("progress");
 					transferProgress.setAttribute("value", 0);
 					transferProgress.setAttribute("max", 1);
+					let statusDiv = document.createElement("div");
+					statusDiv.classList.add("status");
+					statusDiv.innerText = transfer.status.replace("_", " ");
+					wrapper.appendChild(transferProgress);
+					wrapper.appendChild(statusDiv);
 					transferDiv.appendChild(transferSpan);
-					transferDiv.appendChild(transferProgress);
+					transferDiv.appendChild(wrapper);
 					chatContent.insertBefore(transferDiv, chatContent.lastChild); // insert before the chat state div
 
 					// scroll to bottom
@@ -172,8 +180,8 @@ function connect() {
 			} else {
 				let transferDiv = document.getElementById(transfer.streamID);
 				if (transferDiv) {
-					let transferSpan = transferDiv.querySelector("span");
-					transferSpan.innerText = "sending file " + transfer.fileName + " (" + transfer.status + ")";
+					let statusDiv = transferDiv.querySelector(".status");
+					statusDiv.innerText = transfer.status.replace("_", " ");
 					let transferProgress = transferDiv.querySelector("progress");
 					transferProgress.setAttribute("value", transfer.progress);
 				}

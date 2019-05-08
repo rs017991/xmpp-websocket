@@ -151,9 +151,30 @@
 	color: #ccc;
 }
 
+.chatContent .filetransfer {
+	font-weight: bold;
+}
+
 .chatContent .filetransfer progress {
 	width: 100%;
 	display: block;
+	height: 1.5em;
+}
+
+.chatContent .filetransfer .progress-wrapper {
+	position: relative;
+}
+
+.chatContent .filetransfer .status {
+	position: absolute;
+	text-align: center;
+	width: 100%;
+	padding: 0;
+	top: 0;
+	line-height: 1.5em;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .chatInput {
