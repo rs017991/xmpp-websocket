@@ -10,10 +10,12 @@ import org.slf4j.LoggerFactory;
 
 public class ChatStateListenerImpl implements ChatStateListener {
 	private ConnectionManager connectionManager;
+	private String sessionId;
 	private static final Logger LOGGER = LoggerFactory.getLogger(ChatStateListenerImpl.class);
 
-	public ChatStateListenerImpl(ConnectionManager connectionManager) {
+	public ChatStateListenerImpl(ConnectionManager connectionManager, String sessionId) {
 		this.connectionManager = connectionManager;
+		this.sessionId = sessionId;
 	}
 
 	@Override
@@ -23,7 +25,7 @@ public class ChatStateListenerImpl implements ChatStateListener {
 		LOGGER.info("chat state: {}", state);
 		LOGGER.info("message: {}", message);
 
-		connectionManager.notifyChatState(chat.getXmppAddressOfChatPartner().asBareJid().toString(),
-				message.getTo().asBareJid().toString(), state);
+		connectionManager.notifyChatState(chat.getXmppAddressOfChatPartner().toString(),
+				sessionId, state);
 	}
 }

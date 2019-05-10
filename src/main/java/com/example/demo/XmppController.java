@@ -35,12 +35,15 @@ public class XmppController {
 	}
 
 	@MessageMapping("/sendOutgoingFile")
-	public void sendOutgoingFile(Message<byte[]> message, @Header("simpSessionId") String sessionId, @Header("filename") String filename, @Header("content-type") String contentType, @Header("stream") String streamId) throws IOException, InterruptedException {
+	public void sendOutgoingFile(Message<byte[]> message, @Header("simpSessionId") String sessionId,
+			@Header("filename") String filename, @Header("content-type") String contentType,
+			@Header("stream") String streamId) throws IOException, InterruptedException {
 		connectionManager.sendFile(sessionId, message.getPayload(), filename, contentType, streamId);
 	}
 
 	@MessageMapping("/initiateOutgoingFile")
-	public void initiateOutgoingFile(String recipientJid, @Header("simpSessionId") String sessionId) throws XmppStringprepException {
+	public void initiateOutgoingFile(String recipientJid, @Header("simpSessionId") String sessionId)
+			throws XmppStringprepException {
 		connectionManager.initiateOutgoingFile(sessionId, recipientJid);
 	}
 
@@ -90,14 +93,15 @@ public class XmppController {
 		} finally {
 			connectionManager.sendLoginResponse(sessionId, loginResponse);
 		}
-
-		if (loginResponse.isSuccess()) {
-			connectionManager.sendRoster(sessionId);
-		}
 	}
 
 	@MessageMapping("/logout")
 	public void logout(@Header("simpSessionId") String sessionId) {
 		connectionManager.removeSession(sessionId);
+	}
+
+	@MessageMapping("/rejectIncomingFile")
+	public void rejectIncomingFile(@Header("simpSessionId") String sessionId, String streamId) {
+		connectionManager.rejectIncomingFile(sessionId, streamId);
 	}
 }

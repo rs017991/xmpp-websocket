@@ -10,18 +10,18 @@ import org.slf4j.LoggerFactory;
 
 public class RosterListenerImpl implements RosterListener {
 	private ConnectionManager connectionManager;
-	private String jid;
+	private String sessionId;
 	private static final Logger LOGGER = LoggerFactory.getLogger(RosterListenerImpl.class);
 
-	public RosterListenerImpl(ConnectionManager connectionManager, String jid) {
+	public RosterListenerImpl(ConnectionManager connectionManager, String sessionId) {
 		this.connectionManager = connectionManager;
-		this.jid = jid;
+		this.sessionId = sessionId;
 	}
 
 	@Override
 	public void entriesAdded(Collection<Jid> addresses) {
 		LOGGER.info("entries added: {}", addresses);
-		connectionManager.notifyRosterEntriesAdded(jid, addresses);
+		connectionManager.notifyRosterEntriesAdded(sessionId, addresses);
 	}
 
 	@Override
@@ -39,6 +39,6 @@ public class RosterListenerImpl implements RosterListener {
 	@Override
 	public void presenceChanged(Presence presence) {
 		LOGGER.info("presence changed: {}", presence);
-		connectionManager.notifyPresenceChange(jid, presence);
+		connectionManager.notifyPresenceChange(sessionId, presence);
 	}
 }

@@ -155,6 +155,11 @@
 	font-weight: bold;
 }
 
+.chatContent .filetransfer .actions {
+	display: flex;
+	justify-content: space-evenly;
+}
+
 .chatContent .filetransfer progress {
 	width: 100%;
 	display: block;

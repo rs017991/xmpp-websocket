@@ -131,9 +131,9 @@ function connect() {
 				}
 			}
 		});
-		stompClient.subscribe('/user/queue/outgoingFileTransfer', (json) => {
+		stompClient.subscribe('/user/queue/fileTransfer', (json) => {
 			let transfer = JSON.parse(json.body);
-			if (transfer.status === "initial" && !transfer.fileName) {
+			if (transfer.status === "Initial" && !transfer.fileName) {
 				let recipientJid = transfer.peer.localpart + "@" + transfer.peer.domain;
 				let chatWindow = showChatWindow(recipientJid);
 				let fileInput = chatWindow.querySelector("input[type=file]");
@@ -154,7 +154,7 @@ function connect() {
 					transferProgress.setAttribute("max", 1);
 					let statusDiv = document.createElement("div");
 					statusDiv.classList.add("status");
-					statusDiv.innerText = transfer.status.replace("_", " ");
+					statusDiv.innerText = transfer.status;
 					wrapper.appendChild(transferProgress);
 					wrapper.appendChild(statusDiv);
 					transferDiv.appendChild(transferSpan);
@@ -180,12 +180,64 @@ function connect() {
 			} else {
 				let transferDiv = document.getElementById(transfer.streamID);
 				if (transferDiv) {
+					// show progress wrapper if hidden (used by incoming file transfers)
+					let wrapper = transferDiv.querySelector(".progress-wrapper");
+					wrapper.classList.remove("d-none");
+
 					let statusDiv = transferDiv.querySelector(".status");
-					statusDiv.innerText = transfer.status.replace("_", " ");
+					statusDiv.innerText = transfer.status;
 					let transferProgress = transferDiv.querySelector("progress");
-					transferProgress.setAttribute("value", transfer.progress);
+					if (transfer.progress >= 0) {
+						transferProgress.setAttribute("value", transfer.progress);
+					} else {
+						transferProgress.removeAttribute("value");
+					}
 				}
 			}
+		});
+		stompClient.subscribe('/user/queue/incomingFileTransferRequest', (json) => {
+			let transferRequest = JSON.parse(json.body);
+
+			// show chat window
+			let fromJid = transferRequest.requestor.localpart + "@" + transferRequest.requestor.domain;
+			let chatWindow = showChatWindow(fromJid);
+
+			// add incoming file transfer request prompt
+			let incomingDiv = document.createElement("div");
+			incomingDiv.classList.add("filetransfer");
+			incomingDiv.id = transferRequest.streamID;
+			let incomingSpan = document.createElement("span");
+			incomingSpan.innerText = jidToName(fromJid) + " wants to send you " + transferRequest.fileName + " (" + filesize(transferRequest.fileSize) + ")";
+			let actionsDiv = document.createElement("div");
+			actionsDiv.classList.add("actions");
+			let acceptLink = document.createElement("a");
+			acceptLink.classList.add("accept");
+			acceptLink.innerText = "Accept";
+			acceptLink.setAttribute("href", "downloadIncomingFile?streamId=" + transferRequest.streamID + "&sessionId=" + json.headers["session-id"]);
+			let rejectLink = document.createElement("a");
+			rejectLink.classList.add("reject");
+			rejectLink.innerText = "Reject";
+			rejectLink.setAttribute("href", "#");
+			actionsDiv.appendChild(acceptLink);
+			actionsDiv.appendChild(rejectLink);
+			let wrapper = document.createElement("div");
+			wrapper.classList.add("progress-wrapper");
+			wrapper.classList.add("d-none");
+			let transferProgress = document.createElement("progress");
+			transferProgress.setAttribute("value", 0);
+			transferProgress.setAttribute("max", 1);
+			let statusDiv = document.createElement("div");
+			statusDiv.classList.add("status");
+			wrapper.appendChild(transferProgress);
+			wrapper.appendChild(statusDiv);
+			incomingDiv.appendChild(incomingSpan);
+			incomingDiv.appendChild(actionsDiv);
+			incomingDiv.appendChild(wrapper);
+			let chatContent = chatWindow.querySelector(".chatContent");
+			chatContent.insertBefore(incomingDiv, chatContent.lastChild); // insert before the chat state div
+
+			// scroll to bottom
+			chatContent.lastChild.scrollIntoView({ behavior: "smooth" });
 		});
 	};
 	stompClient.activate();
@@ -196,7 +248,6 @@ function sendMessage(event) {
 	var jid = chatWindow.dataset.jid;
 	var chatInput = event.target.chatInput;
 	var inputValue = chatInput.value;
-	// console.log("sendMessage: " + jid + ", " + inputValue);
 
 	if (inputValue !== "") {
 		// send to server
@@ -379,6 +430,22 @@ function handleChatInput(jid, chatInputValue) {
 	document.getElementById("chatWindows").addEventListener('click', (event) => {
 		if (event.target.classList.contains('close')) {
 			event.target.closest(".chatWindow").remove();
+		} else if (event.target.classList.contains('reject')) {
+			event.preventDefault();
+
+			// remove actions
+			let transferDiv = event.target.closest(".filetransfer");
+			event.target.closest(".actions").remove();
+
+			// reject the transfer
+			stompClient.publish({
+				destination: '/app/rejectIncomingFile',
+				body: transferDiv.id
+			});
+		} else if (event.target.classList.contains('accept')) {
+			// remove actions
+			let transferDiv = event.target.closest(".filetransfer");
+			event.target.closest(".actions").remove();
 		}
 	});
 	document.getElementById("chatWindows").addEventListener('submit', (event) => {

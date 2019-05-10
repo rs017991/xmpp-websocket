@@ -1,7 +1,5 @@
 package com.example.demo;
 
-import static org.springframework.util.CollectionUtils.isEmpty;
-
 import java.io.ByteArrayInputStream;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
@@ -11,16 +9,13 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.ReconnectionManager;
 import org.jivesoftware.smack.SmackException.NotConnectedException;
-import org.jivesoftware.smack.SmackException.NotLoggedInException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
 import org.jivesoftware.smack.packet.Message;
@@ -29,9 +24,12 @@ import org.jivesoftware.smack.roster.Roster;
 import org.jivesoftware.smack.roster.RosterEntry;
 import org.jivesoftware.smackx.chatstates.ChatStateManager;
 import org.jivesoftware.smackx.delay.packet.DelayInformation;
-import org.jivesoftware.smackx.filetransfer.FileTransferManager;
-import org.jivesoftware.smackx.filetransfer.OutgoingFileTransfer;
+import org.jivesoftware.smackx.filetransfer.FileTransfer;
 import org.jivesoftware.smackx.filetransfer.FileTransfer.Status;
+import org.jivesoftware.smackx.filetransfer.FileTransferManager;
+import org.jivesoftware.smackx.filetransfer.FileTransferRequest;
+import org.jivesoftware.smackx.filetransfer.IncomingFileTransfer;
+import org.jivesoftware.smackx.filetransfer.OutgoingFileTransfer;
 import org.jxmpp.jid.BareJid;
 import org.jxmpp.jid.EntityBareJid;
 import org.jxmpp.jid.EntityFullJid;
@@ -45,6 +43,7 @@ import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Async;
 
 import com.example.demo.pojo.ChatState;
 import com.example.demo.pojo.IncomingMessage;
@@ -58,10 +57,9 @@ import com.example.demo.pojo.User;
  * and the sessions associated with the jids
  */
 public class ConnectionManager implements DisposableBean {
-	private Map<String, AbstractXMPPConnection> jidToConnectionMap = new HashMap<String, AbstractXMPPConnection>();
-	private Map<String, String> sessionIdToJidMap = new HashMap<String, String>();
-	private Map<String, Collection<String>> jidToSessionIdsMap = new HashMap<String, Collection<String>>();
+	private Map<String, AbstractXMPPConnection> sessionIdToConnectionMap = new HashMap<String, AbstractXMPPConnection>();
 	private Map<String, Collection<OutgoingFileTransfer>> sessionIdToOutgoingFileTransfers = new HashMap<String, Collection<OutgoingFileTransfer>>();
+	private Set<FileTransferRequest> fileTransferRequests = new HashSet<FileTransferRequest>();
 	private SimpMessagingTemplate template;
 	private static final Logger LOGGER = LoggerFactory.getLogger(ConnectionManager.class);
 
@@ -70,20 +68,7 @@ public class ConnectionManager implements DisposableBean {
 	}
 
 	public void addConnection(String sessionId, String jid, AbstractXMPPConnection connection) throws Exception {
-		sessionIdToJidMap.put(sessionId, jid);
-		Collection<String> sessionIds = jidToSessionIdsMap.get(jid);
-		if (isEmpty(sessionIds)) {
-			sessionIds = new HashSet<String>();
-			jidToSessionIdsMap.put(jid, sessionIds);
-		}
-		sessionIds.add(sessionId);
-
-		if (jidToConnectionMap.containsKey(jid)) {
-			LOGGER.info("already in connection manager");
-			return;
-		}
-
-		jidToConnectionMap.put(jid, connection);
+		sessionIdToConnectionMap.put(sessionId, connection);
 
 		LOGGER.info("Connecting to server for domain: {}", connection.getConfiguration().getXMPPServiceDomain());
 		connection.connect();
@@ -98,21 +83,25 @@ public class ConnectionManager implements DisposableBean {
 		// roster
 		Roster roster = Roster.getInstanceFor(connection);
 		roster.setSubscriptionMode(Roster.SubscriptionMode.accept_all);
-		roster.addRosterListener(new RosterListenerImpl(this, jid));
+		roster.addRosterListener(new RosterListenerImpl(this, sessionId));
 
 		// chat
 		ChatManager chatManager = ChatManager.getInstanceFor(connection);
-		chatManager.addIncomingListener(new IncomingChatMessageListenerImpl(this));
+		chatManager.addIncomingListener(new IncomingChatMessageListenerImpl(this, sessionId));
 
 		// chat state
 		ChatStateManager chatStateManager = ChatStateManager.getInstance(connection);
-		chatStateManager.addChatStateListener(new ChatStateListenerImpl(this));
+		chatStateManager.addChatStateListener(new ChatStateListenerImpl(this, sessionId));
+
+		// file transfer
+		FileTransferManager fileTransferManager = FileTransferManager.getInstanceFor(connection);
+		fileTransferManager.addFileTransferListener(new FileTransferListenerImpl(this, sessionId));
 	}
 
 	/**
-	 * notifies the WebSocket client(s) of a new incoming message
+	 * notifies the WebSocket client of a new incoming message
 	 */
-	public void notifyIncomingMessage(Message message) {
+	public void notifyIncomingMessage(String sessionId, Message message) {
 		IncomingMessage incomingMessage = new IncomingMessage();
 		incomingMessage.setFrom(message.getFrom().asBareJid().toString());
 		incomingMessage.setMessage(message.getBody());
@@ -121,7 +110,7 @@ public class ConnectionManager implements DisposableBean {
 		DelayInformation delayInformation = (DelayInformation) message.getExtension(DelayInformation.ELEMENT,
 				DelayInformation.NAMESPACE);
 		incomingMessage.setTimestamp(delayInformation == null ? new Date() : delayInformation.getStamp());
-		sendToJid(message.getTo().asBareJid().toString(), "/queue/incomingMessage", incomingMessage);
+		sendToSession(sessionId, "/queue/incomingMessage", incomingMessage);
 	}
 
 	/**
@@ -129,8 +118,7 @@ public class ConnectionManager implements DisposableBean {
 	 */
 	public void sendXmppMessage(String sessionId, OutgoingMessage message)
 			throws XmppStringprepException, NotConnectedException, InterruptedException {
-		String jid = sessionIdToJidMap.get(sessionId);
-		AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+		AbstractXMPPConnection connection = sessionIdToConnectionMap.get(sessionId);
 		ChatManager chatManager = ChatManager.getInstanceFor(connection);
 		EntityBareJid entityBareJid = JidCreate.entityBareFrom(message.getTo());
 		chatManager.chatWith(entityBareJid).send(message.getMessage());
@@ -142,34 +130,21 @@ public class ConnectionManager implements DisposableBean {
 	 */
 	@Override
 	public void destroy() throws Exception {
-		jidToConnectionMap.forEach((jid, connection) -> {
-			LOGGER.info("disconnecting {}", jid);
+		sessionIdToConnectionMap.forEach((sessionId, connection) -> {
+			LOGGER.info("disconnecting connection associated with session {}", sessionId);
 			connection.disconnect();
 		});
 	}
 
 	public void removeSession(String sessionId) {
-		String jid = sessionIdToJidMap.get(sessionId);
-		if (jid != null) {
-			sessionIdToJidMap.remove(sessionId);
-			Collection<String> sessionIds = jidToSessionIdsMap.get(jid);
-			if (!isEmpty(sessionIds)) {
-				LOGGER.info("removing WebSocket session ID {}, which was being used by jid {}", sessionId, jid);
-				sessionIds.remove(sessionId);
-			}
+		AbstractXMPPConnection connection = sessionIdToConnectionMap.get(sessionId);
+		if (connection != null) {
+			sessionIdToConnectionMap.remove(sessionId);
 
-			if (isEmpty(sessionIds)) {
-				AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
-				if (connection != null) {
-					jidToConnectionMap.remove(jid);
-
-					if (connection.isConnected()) {
-						// TODO should we reuse this connection?
-						LOGGER.info("disconnecting XMPP connection for jid {}, used by WebSocket session Id {}", jid,
-								sessionId);
-						connection.disconnect();
-					}
-				}
+			if (connection.isConnected()) {
+				// TODO should we reuse this connection?
+				LOGGER.info("disconnecting XMPP connection used by WebSocket session Id {}", sessionId);
+				connection.disconnect();
 			}
 		}
 	}
@@ -190,8 +165,8 @@ public class ConnectionManager implements DisposableBean {
 		}
 	}
 
-	public void notifyRosterEntriesAdded(String jid, Collection<Jid> addresses) {
-		AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+	public void notifyRosterEntriesAdded(String sessionId, Collection<Jid> addresses) {
+		AbstractXMPPConnection connection = sessionIdToConnectionMap.get(sessionId);
 		Roster roster = Roster.getInstanceFor(connection);
 
 		// using a TreeMap to sort by jid
@@ -207,25 +182,16 @@ public class ConnectionManager implements DisposableBean {
 		if (!users.isEmpty()) {
 			RosterChange rosterChange = new RosterChange();
 			rosterChange.setEntriesAdded(users);
-			sendToJid(jid, "/queue/roster", rosterChange);
+			sendToSession(sessionId, "/queue/roster", rosterChange);
 		}
 	}
 
-	public void notifyPresenceChange(String jid, Presence presence) {
+	public void notifyPresenceChange(String sessionId, Presence presence) {
 		Map<String, String> jidToPresence = Collections.singletonMap(presence.getFrom().asBareJid().toString(),
 				getPresenceDisplay(presence));
 		RosterChange rosterChange = new RosterChange();
 		rosterChange.setPresenceChanged(jidToPresence);
-		sendToJid(jid, "/queue/roster", rosterChange);
-	}
-
-	/**
-	 * sends the WebSocket payload to all sessions associated with the given jid
-	 */
-	private void sendToJid(String jid, String destination, Object payload) {
-		jidToSessionIdsMap.get(jid).stream().forEach(sessionId -> {
-			sendToSession(sessionId, destination, payload);
-		});
+		sendToSession(sessionId, "/queue/roster", rosterChange);
 	}
 
 	/**
@@ -238,6 +204,8 @@ public class ConnectionManager implements DisposableBean {
 		// see: https://stackoverflow.com/q/42327780
 		SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
 		headerAccessor.setSessionId(sessionId);
+		// needed to allow session ID to be used as a request parameter on the incoming file request download link
+		headerAccessor.setNativeHeader("session-id", sessionId);
 		headerAccessor.setLeaveMutable(true);
 		MessageHeaders messageHeaders = headerAccessor.getMessageHeaders();
 		template.convertAndSendToUser(sessionId, destination, payload, messageHeaders);
@@ -276,51 +244,25 @@ public class ConnectionManager implements DisposableBean {
 		sendToSession(sessionId, "/queue/login", loginResponse);
 	}
 
-	public void sendRoster(String sessionId) throws NotLoggedInException, NotConnectedException, InterruptedException {
-		String jid = sessionIdToJidMap.get(sessionId);
-		if (jid != null) {
-			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
-			if (connection != null && connection.isAuthenticated()) {
-				Roster roster = Roster.getInstanceFor(connection);
-				if (!roster.isLoaded()) {
-					roster.reloadAndWait();
-				}
-
-				Set<User> users = roster.getEntries().stream().map(entry -> {
-					return rosterEntryToUser(roster, entry);
-				}).filter(Objects::nonNull).collect(Collectors.toCollection(TreeSet::new));
-
-				if (!users.isEmpty()) {
-					RosterChange rosterChange = new RosterChange();
-					rosterChange.setEntriesAdded(users);
-					sendToSession(sessionId, "/queue/roster", rosterChange);
-				}
-			}
-		}
-	}
-
-	public void notifyChatState(String fromJid, String toJid, org.jivesoftware.smackx.chatstates.ChatState state) {
+	public void notifyChatState(String fromJid, String sessionId, org.jivesoftware.smackx.chatstates.ChatState state) {
 		ChatState chatState = new ChatState();
 		chatState.setState(state);
 		chatState.setJid(fromJid);
 
-		sendToJid(toJid, "/queue/chatState", chatState);
+		sendToSession(sessionId, "/queue/chatState", chatState);
 	}
 
 	public void sendChatState(String sessionId, String toJid, org.jivesoftware.smackx.chatstates.ChatState state)
 			throws XmppStringprepException, NotConnectedException, InterruptedException {
-		String jid = sessionIdToJidMap.get(sessionId);
-		if (jid != null) {
-			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+		AbstractXMPPConnection connection = sessionIdToConnectionMap.get(sessionId);
 
-			ChatStateManager chatStateManager = ChatStateManager.getInstance(connection);
+		ChatStateManager chatStateManager = ChatStateManager.getInstance(connection);
 
-			ChatManager chatManager = ChatManager.getInstanceFor(connection);
-			EntityBareJid entityBareJid = JidCreate.entityBareFrom(toJid);
-			Chat chat = chatManager.chatWith(entityBareJid);
+		ChatManager chatManager = ChatManager.getInstanceFor(connection);
+		EntityBareJid entityBareJid = JidCreate.entityBareFrom(toJid);
+		Chat chat = chatManager.chatWith(entityBareJid);
 
-			chatStateManager.setCurrentState(state, chat);
-		}
+		chatStateManager.setCurrentState(state, chat);
 	}
 
 	public void sendFile(String sessionId, byte[] payload, String filename, String contentType, String streamId) {
@@ -333,69 +275,126 @@ public class ConnectionManager implements DisposableBean {
 				// Send the file
 				transfer.sendStream(new ByteArrayInputStream(payload), filename, payload.length, "");
 
-				Status currentStatus = null;
-				while (!transfer.isDone()) {
-					if (transfer.getStatus() != currentStatus) {
-						currentStatus = transfer.getStatus();
-						LOGGER.info("Transfer status: {}", transfer.getStatus());
-						sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
-					}
-					if (Status.in_progress == transfer.getStatus()) {
-						if (LOGGER.isDebugEnabled()) {
-							final DecimalFormat df = new DecimalFormat("#.#");
-							String percent = df.format((transfer.getProgress() * 100.0d));
-							LOGGER.debug("Transfer progress: {}%", percent);
-						}
-						sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
-					}
-
-					try {
-						Thread.sleep(500);
-					} catch (InterruptedException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-				}
-				LOGGER.info("Final transfer status: " + transfer.getStatus());
-				if (Status.error == transfer.getStatus()) {
-					LOGGER.error("Transfer errored out with exception", transfer.getException());
-				}
-				sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
+				monitorFileTransfer(transfer, sessionId);
 			});
 			outgoingFileTransfers.removeIf(streamIdPredicate);
 		}
 	}
 
 	public void initiateOutgoingFile(String sessionId, String recipientJid) throws XmppStringprepException {
-		String jid = sessionIdToJidMap.get(sessionId);
-		if (jid != null) {
-			AbstractXMPPConnection connection = jidToConnectionMap.get(jid);
+		AbstractXMPPConnection connection = sessionIdToConnectionMap.get(sessionId);
 
-			// get the full jid from the bare jid
-			// TODO we probably shouldn't need to do this if we were managing
-			// the resources properly
-			Roster roster = Roster.getInstanceFor(connection);
-			final Presence presense = roster.getPresence(JidCreate.entityBareFrom(recipientJid));
-			final Jid presenceJid = presense.getFrom();
-			if (presenceJid == null || !(presenceJid instanceof EntityFullJid)) {
-				LOGGER.error("No resource found for {}--may not be online", recipientJid);
-				// TODO how do we let the client know that it failed here?
-				return;
-			}
-			final EntityFullJid fullJid = (EntityFullJid) presenceJid;
-
-			// Create the file transfer manager
-			FileTransferManager manager = FileTransferManager.getInstanceFor(connection);
-			// Create the outgoing file transfer
-			OutgoingFileTransfer transfer = manager.createOutgoingFileTransfer(fullJid);
-			Collection<OutgoingFileTransfer> outgoingFileTransfers = sessionIdToOutgoingFileTransfers.get(sessionId);
-			if (outgoingFileTransfers == null) {
-				outgoingFileTransfers = new ArrayList<OutgoingFileTransfer>();
-				sessionIdToOutgoingFileTransfers.put(sessionId, outgoingFileTransfers);
-			}
-			outgoingFileTransfers.add(transfer);
-
-			sendToSession(sessionId, "/queue/outgoingFileTransfer", transfer);
+		// get the full jid from the bare jid
+		// TODO we probably shouldn't need to do this if we were managing
+		// the resources properly
+		Roster roster = Roster.getInstanceFor(connection);
+		final Presence presense = roster.getPresence(JidCreate.entityBareFrom(recipientJid));
+		final Jid presenceJid = presense.getFrom();
+		if (presenceJid == null || !(presenceJid instanceof EntityFullJid)) {
+			LOGGER.error("No resource found for {}--may not be online", recipientJid);
+			// TODO how do we let the client know that it failed here?
+			return;
 		}
+		final EntityFullJid fullJid = (EntityFullJid) presenceJid;
+
+		// Create the file transfer manager
+		FileTransferManager manager = FileTransferManager.getInstanceFor(connection);
+		// Create the outgoing file transfer
+		OutgoingFileTransfer transfer = manager.createOutgoingFileTransfer(fullJid);
+		Collection<OutgoingFileTransfer> outgoingFileTransfers = sessionIdToOutgoingFileTransfers.get(sessionId);
+		if (outgoingFileTransfers == null) {
+			outgoingFileTransfers = new ArrayList<OutgoingFileTransfer>();
+			sessionIdToOutgoingFileTransfers.put(sessionId, outgoingFileTransfers);
+		}
+		outgoingFileTransfers.add(transfer);
+
+		sendToSession(sessionId, "/queue/fileTransfer", transfer);
+	}
+
+	public void handleFileTransferRequest(String sessionId, FileTransferRequest request) {
+		fileTransferRequests.add(request);
+
+		sendToSession(sessionId, "/queue/incomingFileTransferRequest", request);
+	}
+
+	public void rejectIncomingFile(String sessionId, String streamId) {
+		if (!fileTransferRequests.isEmpty()) {
+			Predicate<FileTransferRequest> hasStreamId = r -> streamId.equals(r.getStreamID());
+			fileTransferRequests.stream().filter(hasStreamId).findAny().ifPresent(r -> {
+				try {
+					r.reject();
+
+					// send a psuedo FileTransfer Map-based JSON thing so that the status/progress will be shown
+					Map<String, String> rejectedTransfer = new HashMap<String, String>(2);
+					// TODO ... or should this be Status.cancelled instead of Status.refused??
+					rejectedTransfer.put("status", FileTransfer.Status.refused.toString());
+					rejectedTransfer.put("progress", String.valueOf(0));
+					rejectedTransfer.put("streamID", streamId);
+					sendToSession(sessionId, "/queue/fileTransfer", rejectedTransfer);
+				} catch (NotConnectedException | InterruptedException e) {
+					LOGGER.error(
+							"an error occurred while rejecting the file transfer request with stream ID {} for session ID {}",
+							streamId, sessionId, e);
+				}
+			});
+			fileTransferRequests.removeIf(hasStreamId);
+		} else {
+			LOGGER.error("incoming file stream ID {} not found for session ID {}", streamId, sessionId);
+		}
+	}
+
+	public IncomingFileTransfer acceptIncomingFile(String streamId) {
+		if (!fileTransferRequests.isEmpty()) {
+			Predicate<FileTransferRequest> hasStreamId = r -> streamId.equals(r.getStreamID());
+			IncomingFileTransfer transfer = fileTransferRequests.stream().filter(hasStreamId).findAny()
+					.map(r -> r.accept()).orElseThrow(() -> new IllegalStateException(
+							"unable to accept file transfer with stream ID " + streamId));
+			fileTransferRequests.removeIf(hasStreamId);
+			return transfer;
+		} else {
+			LOGGER.error("incoming file stream ID {} not found", streamId);
+			return null;
+		}
+	}
+
+	@Async
+	public void monitorFileTransfer(FileTransfer transfer, String sessionId) {
+		Status currentStatus = null;
+		while (!transfer.isDone()) {
+			if (transfer.getStatus() != currentStatus) {
+				currentStatus = transfer.getStatus();
+				LOGGER.info("Transfer status: {}", transfer.getStatus());
+				sendToSession(sessionId, "/queue/fileTransfer", transfer);
+			}
+			if (Status.in_progress == transfer.getStatus()) {
+				if (LOGGER.isDebugEnabled()) {
+					final DecimalFormat df = new DecimalFormat("#.#");
+					String percent = df.format((transfer.getProgress() * 100.0d));
+					LOGGER.debug("Transfer progress: {}%", percent);
+				}
+				sendToSession(sessionId, "/queue/fileTransfer", transfer);
+			}
+
+			try {
+				Thread.sleep(500);
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		LOGGER.info("Final transfer status: " + transfer.getStatus());
+		if (Status.error == transfer.getStatus()) {
+			LOGGER.error("Transfer errored out with exception", transfer.getException());
+		}
+		sendToSession(sessionId, "/queue/fileTransfer", transfer);
+	}
+
+	public void setDownloadingStatus(String sessionId, String streamId) {
+		// send a psuedo FileTransfer Map-based JSON thing so that the status/progress will be shown
+		Map<String, String> transfer = new HashMap<String, String>(2);
+		transfer.put("status", "Downloading");
+		transfer.put("progress", String.valueOf(-1));
+		transfer.put("streamID", streamId);
+		sendToSession(sessionId, "/queue/fileTransfer", transfer);
 	}
 }

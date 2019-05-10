@@ -7,10 +7,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @SpringBootApplication
+@EnableAsync
 public class XmppWebSocketApplication {
 	public static void main(String[] args) {
 		/*
